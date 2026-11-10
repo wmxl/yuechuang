@@ -109,7 +109,7 @@ async function settingsView() {
 async function configure({ base = fixtures.origin, model = 'normal', budget = 16000, key } = {}) {
   const frame = await select('settings');
   await frame.locator('#base-url').fill(base + '/v1'); await frame.locator('#model').fill(model);
-  await frame.locator('#remember-key').setChecked(false); await frame.locator('#auto-summary').setChecked(false); await frame.locator('#auto-long-summary').setChecked(false); await frame.locator('#input-budget').fill(String(budget));
+  await frame.locator('#remember-key').setChecked(false); await frame.locator('#auto-long-summary').setChecked(false); await frame.locator('#input-budget').fill(String(budget));
   if (key !== undefined) await frame.locator('#api-key').fill(key);
   await frame.locator('#save-settings').click();
   await until(async () => { const value = await settingsView(); return await frame.locator('#save-settings').isEnabled() && value.settings.model === model && value.settings.baseUrl === base + '/v1' && value.settings.inputBudgetTokens === budget; }, 'embedded settings not saved');

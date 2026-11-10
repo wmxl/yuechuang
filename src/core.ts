@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type Settings } from './shared';
+import { DEFAULT_SETTINGS, MAX_CHAT_OUTPUT_TOKENS, MIN_CHAT_OUTPUT_TOKENS, type Settings } from './shared';
 export const PROMPT_VERSION = 'zh-inline-fulltext-2';
 export const MAX_TEXT = 300_000;
 export function allowedUrl(value: string): URL {
@@ -18,12 +18,14 @@ export function apiEndpoint(value: string): string {
 export function validateSettings(value: unknown): Settings {
   if (!value || typeof value !== 'object') throw new Error('配置格式无效。');
   const s = value as Settings;
-  if (typeof s.baseUrl !== 'string' || typeof s.model !== 'string' || s.baseUrl.length > 2048 || s.model.length > 200 || typeof s.autoSummary !== 'boolean' || typeof s.rememberKey !== 'boolean') throw new Error('配置格式无效。');
+  if (typeof s.baseUrl !== 'string' || typeof s.model !== 'string' || s.baseUrl.length > 2048 || s.model.length > 200 || typeof s.rememberKey !== 'boolean') throw new Error('配置格式无效。');
   if (s.baseUrl.trim()) apiEndpoint(s.baseUrl);
   const inputBudgetTokens = s.inputBudgetTokens ?? DEFAULT_SETTINGS.inputBudgetTokens;
   const autoLongSummary = s.autoLongSummary ?? DEFAULT_SETTINGS.autoLongSummary;
+  const chatOutputTokens = s.chatOutputTokens ?? DEFAULT_SETTINGS.chatOutputTokens;
   if (!Number.isInteger(inputBudgetTokens) || inputBudgetTokens < 2048 || inputBudgetTokens > 128000 || typeof autoLongSummary !== 'boolean') throw new Error('请输入 2048–128000 的整数输入预算。');
-  return { baseUrl: s.baseUrl.trim(), model: s.model.trim(), autoSummary: s.autoSummary, rememberKey: s.rememberKey, inputBudgetTokens, autoLongSummary };
+  if (!Number.isInteger(chatOutputTokens) || chatOutputTokens < MIN_CHAT_OUTPUT_TOKENS || chatOutputTokens > MAX_CHAT_OUTPUT_TOKENS) throw new Error('请输入 512–8192 的整数对话输出预算。');
+  return { baseUrl: s.baseUrl.trim(), model: s.model.trim(), rememberKey: s.rememberKey, inputBudgetTokens, autoLongSummary, chatOutputTokens };
 }
 export function httpError(status: number): string {
   if (status === 401 || status === 403) return '接口拒绝访问（401/403）。请检查 API Key、接口权限和地址。';

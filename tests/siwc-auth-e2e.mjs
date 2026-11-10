@@ -189,7 +189,7 @@ try {
       assert.equal(JSON.parse(requests[1].body.input[0].content).existingCoreAnswer, '产品');
     } finally { await page.close(); }
   });
-  await check('link preview generates and reuses a subscription summary without an API Key', async () => {
+  await check('link preview automatically generates and reuses a subscription summary without an API Key', async () => {
     assert.equal((await rpc('settings:get')).hasKey, false);
     const before = await worker.evaluate(() => __authFixture.requests.length);
     const page = await context.newPage();
@@ -206,7 +206,6 @@ try {
         await preview.waitFor();
         await page.mouse.up();
         await preview.locator('.page-status[data-state="ready"]').waitFor();
-        await action('summarize').click();
         const status = preview.locator('.status[data-phase="done"]');
         await status.waitFor();
         assert.equal(await preview.locator('[data-reader-output]').innerText(), '纯扩展测试摘要');

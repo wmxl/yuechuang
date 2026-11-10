@@ -17,6 +17,7 @@ export const SIWC_ERRORS = {
   model: '当前账号没有可用的所选模型，请刷新模型列表。',
   format: 'OpenAI 响应格式不符合预期，本次请求已停止。',
   interrupted: '回答尚未完成，连接已中断；收到的片段已保留。',
+  length: '模型输出达到长度上限，回答尚未完成。',
   timeout: 'OpenAI 请求超时，本次请求已停止，请手动重试。',
   output: '回答超过 40,000 字符上限，已停止生成。',
   authDenied: '本次官方登录或套餐授权未完成，请重新登录并确认授权。',
@@ -160,7 +161,10 @@ export class SiwcStream {
       this.responseId = value.response.id;
     }
     if (value.type === 'response.failed' || value.type === 'error') throw this.failure(streamFailure(value.response || value).code, 'terminalStatus');
-    if (value.type === 'response.incomplete') throw this.failure('interrupted', 'terminalStatus');
+    if (value.type === 'response.incomplete') {
+      const details = record(value.response) ? value.response.incomplete_details : undefined;
+      throw this.failure(record(details) && details.reason === 'max_output_tokens' ? 'length' : 'interrupted', 'terminalStatus');
+    }
     // Display only the model supplied by this response, never the requested
     // model as an inferred result. A valid final model replaces earlier data.
     if (record(value.response) && value.type !== 'response.completed') {

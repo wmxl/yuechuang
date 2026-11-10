@@ -93,7 +93,7 @@ async function openResearch() {
 async function configure(model = 'normal', budget = 16000, suppliedKey) {
   await options.bringToFront(); await until(() => options.locator('#save-settings').isEnabled(), 'settings unavailable');
   await options.locator('#base-url').fill(url('/v1')); await options.locator('#model').fill(model);
-  await options.locator('#remember-key').setChecked(false); await options.locator('#auto-summary').setChecked(false); await options.locator('#auto-long-summary').setChecked(false); await options.locator('#input-budget').fill(String(budget));
+  await options.locator('#remember-key').setChecked(false); await options.locator('#auto-long-summary').setChecked(false); await options.locator('#input-budget').fill(String(budget));
   if (suppliedKey !== undefined) await options.locator('#api-key').fill(suppliedKey);
   await options.locator('#save-settings').click();
   await until(async () => {

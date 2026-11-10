@@ -4,6 +4,7 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import { DEFAULT_SETTINGS } from '../src/shared.ts';
 import { CHAT_PORT, CHAT_SESSION_KEY, type ChatState } from '../src/chat-shared.ts';
 import { planChat } from '../src/chat-model.ts';
+import { estimateTokens } from '../src/summary.ts';
 
 class Hub<Args extends unknown[]> {
   listeners: ((...args: Args) => unknown)[] = [];
@@ -136,7 +137,7 @@ test('two turns preserve real assistant roles, store only session conversation a
   assert.equal(calls.length, 2); assert.equal(beforeRequests, 2);
   assert.deepEqual(calls[1].body.messages.map(item => item.role), ['system', 'user', 'assistant', 'user']);
   assert.deepEqual(calls[1].body.messages.slice(1).map(item => item.content), ['第一个问题', output, '接着解释']);
-  assert.equal(calls[1].body.max_tokens, 1536); assert.equal(calls[0].url, API + '/chat/completions');
+  assert.equal(calls[1].body.max_tokens, 8192); assert.equal(calls[0].url, API + '/chat/completions');
   assert.ok(!JSON.stringify(port.sent).includes(KEY)); assert.ok(!JSON.stringify(session[CHAT_SESSION_KEY]).includes(KEY));
   assert.equal(local[CHAT_SESSION_KEY], undefined); assert.equal(session.apiKey, KEY); assert.equal(last(port).messages.length, 4);
 });
@@ -148,6 +149,18 @@ test('input, turn-count and complete-history budget limits reject without a paid
   await send(port, '预算'.repeat(2500)); assert.match(last(port).error!, /预算/); assert.equal(calls.length, 0); assert.equal(beforeRequests, 0);
   const history = Array.from({ length: 40 }, (_, index) => ({ id: String(index), role: index % 2 ? 'assistant' as const : 'user' as const, content: 'a', status: 'done' as const }));
   assert.throws(() => planChat(config, history, 'next'), /40 条/);
+});
+
+test('a smaller context lowers the requested output budget while keeping the full input', async () => {
+  const port = await connect();
+  (local.settings as typeof config).inputBudgetTokens = 2048;
+  assert.equal((await send(port, '你好')).status, 'idle');
+  const request = calls[0].body;
+  const estimatedInput = request.messages.reduce((sum, item) => sum + estimateTokens(item.content) + 8, 0);
+  assert.equal(request.max_tokens, 2048 - estimatedInput - 64);
+  (local.settings as typeof config).chatOutputTokens = 512;
+  assert.equal((await send(port, '接着解释')).status, 'idle');
+  assert.equal(calls[1].body.max_tokens, 512);
 });
 
 test('official subscription planning ignores API endpoint settings while enforcing input, complete-history and budget limits', () => {

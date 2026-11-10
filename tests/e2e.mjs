@@ -75,12 +75,11 @@ async function check(name, fn) {
   }
 }
 
-async function settings({ model = 'normal', auto = false, remember = false, key, budget = 16000, autoLong = false, baseUrl = `${fixtures.origin}/v1` } = {}) {
+async function settings({ model = 'normal', remember = false, key, budget = 16000, autoLong = false, baseUrl = `${fixtures.origin}/v1` } = {}) {
   await options.bringToFront();
   await until(() => options.locator('#save-settings').isEnabled(), 'settings not ready');
   await options.locator('#base-url').fill(baseUrl);
   await options.locator('#model').fill(model);
-  await options.locator('#auto-summary').setChecked(auto);
   await options.locator('#remember-key').setChecked(remember);
   await options.locator('#input-budget').fill(String(budget));
   await options.locator('#auto-long-summary').setChecked(autoLong);
@@ -89,7 +88,7 @@ async function settings({ model = 'normal', auto = false, remember = false, key,
   await until(async () => {
     if (!await options.locator('#save-settings').isEnabled()) return false;
     const current = await options.evaluate(() => chrome.runtime.sendMessage({ type: 'settings:get' }));
-    return current.ok && current.settings.model === model && current.settings.autoSummary === auto && current.settings.rememberKey === remember;
+    return current.ok && current.settings.model === model && current.settings.autoLongSummary === autoLong && current.settings.rememberKey === remember;
   }, 'settings were not saved');
 }
 
@@ -184,7 +183,6 @@ try {
   await check('M1-01 inline real page preview without API credentials', async () => {
     fixtures.reset(); const frame = await drag('article-a', '/article-a');
     assert.match(await frame.locator('article').innerText(), /ARTICLE_A_SENTINEL/);
-    await action(source, 'summarize').click();
     await until(async () => await status(source).getAttribute('data-phase') === 'error', 'configuration error absent');
     assert.match(await status(source).innerText(), /配置|设置|Key|模型|接口/); assert.equal(count(), 0);
     await action(source, 'close').click(); await panel(source).waitFor({state:'detached'});
@@ -215,10 +213,10 @@ try {
     assert.equal(await panel(source).isVisible(),true); report.firstPreviewMilliseconds=Date.now()-started;
     assert.equal((await options.evaluate(() => chrome.windows.getAll())).length,windows.length);
     assert.equal(context.pages().filter(page => !page.isClosed() && page.url().includes('/article-a')).length,0);
-    assert.equal(count(),0); await source.mouse.up();
-    await action(source,'summarize').evaluate(node=>node.click()); await sleep(200);
-    assert.equal(count(),0,'untrusted page-script button click started a model call');
-    assert.equal(await status(source).getAttribute('data-phase'),'ready');
+    await source.mouse.up(); await complete();
+    assert.equal(count(),1);
+    await action(source,'reread').evaluate(node=>node.click()); await sleep(200);
+    assert.equal(count(),1,'untrusted page-script button click started another model call');
     assert.equal(source.url(),fixtures.origin+'/index'); assert.ok(Math.abs(await source.evaluate(() => scrollY)-before)<=2);
     assert.match(await frame.locator('article').innerText(),/ARTICLE_A_SENTINEL/);
     assert.equal(await panel(source).locator('iframe').getAttribute('sandbox'),'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads');
@@ -233,11 +231,11 @@ try {
     await source.mouse.move(15,15); await sleep(220);
     assert.equal(await panel(source).locator('.scrim').evaluate(node => node.classList.contains('active')),false);
   });
-  await check('M1-05/07/08 manual target and visible streaming', async () => {
-    await action(source,'summarize').click();
+  await check('M1-05/07/08 explicit refresh and visible streaming', async () => {
+    const before=count(); await action(source,'reread').click();
     await until(async () => (await summary(source).innerText()).includes('ARTICLE_A_SENTINEL'),'first stream text absent');
     assert.ok(!(await summary(source).innerText()).includes('仅验证扩展流程'));
-    assert.match(await complete(),/ARTICLE_A_SENTINEL/); assert.equal(count(),1);
+    assert.match(await complete(),/ARTICLE_A_SENTINEL/); assert.equal(count(),before+1);
     assert.doesNotMatch(JSON.stringify(lastRequest().body),/ARTICLE_B_SENTINEL/);
     assert.match(JSON.stringify(lastRequest().body),/const controller/);
     await action(source,'copy').click(); await source.screenshot({path:path.join(output,'inline-summary.png')});
@@ -256,13 +254,13 @@ try {
   await check('M1-12 duplicate clicks cache and explicit refresh', async () => {
     const before=count(); await generate(); assert.equal(count(),before);
     assert.match(await panel(source).locator('.plan-text').innerText(),/缓存.*不产生模型调用/);
-    await drag('article-a','/article-a'); await generate(); assert.equal(count(),before);
+    await drag('article-a','/article-a'); await complete(); assert.equal(count(),before);
     await action(source,'reread').click(); await action(source,'summarize').evaluate(node => node.click());
     await complete(); assert.equal(count(),before+1);
   });
   await check('M1-04 XFO-only target loads through limited frame rule', async () => {
     const frame=await drag('xfo','/xfo'); assert.match(await frame.locator('article').innerText(),/ARTICLE_A_SENTINEL/);
-    assert.equal((await fetch(fixtures.origin+'/xfo')).headers.get('x-frame-options'),'DENY'); await generate();
+    assert.equal((await fetch(fixtures.origin+'/xfo')).headers.get('x-frame-options'),'DENY'); await complete();
     const rules=await options.evaluate(() => chrome.declarativeNetRequest.getSessionRules());
     assert.equal(rules.length,1); assert.equal(rules[0].condition.tabIds.length,1);
     assert.deepEqual(rules[0].condition.requestDomains,['127.0.0.1']);
@@ -282,30 +280,30 @@ try {
     await action(source,'close').click(); await panel(source).waitFor({state:'detached'});
     assert.equal(source.url(),fixtures.origin+'/index'); assert.ok(Math.abs(await source.evaluate(() => scrollY)-before)<=2);
   });
-  await check('M1-06 automatic summary once and disabled setting', async () => {
-    await settings({auto:true}); fixtures.reset(); await drag('article-b','/article-b');
+  await check('M1-06 automatic summary once per new link preview', async () => {
+    await settings(); fixtures.reset(); await drag('article-b','/article-b');
     assert.match(await complete(),/ARTICLE_B_SENTINEL/); assert.equal(count(),1);
-    await settings(); fixtures.reset(); await drag('article-a','/article-a'); await sleep(900); assert.equal(count(),0); await generate(); assert.equal(count(),1);
+    await sleep(900); assert.equal(count(),1);
   });
   await check('M1-06 same URL automatic preview repeats without stale state', async () => {
-    await settings({auto:true}); fixtures.reset();
+    await settings(); fixtures.reset();
     for(let i=0;i<3;i++){await options.evaluate(() => chrome.runtime.sendMessage({type:'settings:clear-cache'})); await drag('article-a','/article-a'); assert.match(await complete(),/ARTICLE_A_SENTINEL/); assert.equal(count(),i+1);}
   });
   await check('M1-09 A B isolation in a single source float', async () => {
-    await settings({model:'slow',auto:true}); fixtures.reset(); await drag('article-a','/article-a');
+    await settings({model:'slow'}); fixtures.reset(); await drag('article-a','/article-a');
     await until(() => count()===1,'A call absent'); await drag('article-b','/article-b');
     const text=await complete(); assert.match(text,/ARTICLE_B_SENTINEL/); assert.doesNotMatch(text,/ARTICLE_A_SENTINEL/);
     assert.equal(count(),2); assert.equal(fixtures.getStats().requests[0].aborted,true); assert.equal(await panel(source).count(),1);
   });
   await check('M1-08 stop and close abort clients', async () => {
-    await settings({model:'slow'}); fixtures.reset(); await drag('article-a','/article-a'); await action(source,'summarize').click();
+    await settings({model:'slow'}); fixtures.reset(); await drag('article-a','/article-a');
     await until(() => count()===1,'call absent'); await action(source,'stop').click(); const text=await summary(source).innerText();
     await sleep(3700); assert.equal(await summary(source).innerText(),text); assert.equal(lastRequest().aborted,true);
     await action(source,'summarize').click(); await until(() => count()===2,'retry absent'); await action(source,'close').click();
     await until(() => lastRequest().aborted,'close did not abort'); await panel(source).waitFor({state:'detached'});
   });
   await check('M1-LONG confirmation whole text tail survives section and merge', async () => {
-    await settings({budget:4096}); fixtures.reset(); await drag('long','/long'); await action(source,'summarize').click();
+    await settings({budget:4096}); fixtures.reset(); await drag('long','/long');
     await until(async () => await status(source).getAttribute('data-phase')==='confirming','long confirmation absent');
     assert.equal(count(),0); assert.match(await panel(source).locator('.plan-text').innerText(),/次模型调用/);
     const plannedSections=Number((await panel(source).locator('.plan-text').innerText()).match(/分为 (\d+) 节/)?.[1]);
@@ -324,17 +322,17 @@ try {
     return {requests:calls.length,sectionRequests:calls.filter(call=>call.stage==='section').length,tailReachedFinalMerge:true,progressLabels:[...progressLabels]};
   });
   await check('M1-LONG outside article lead remains metadata', async () => {
-    await settings(); fixtures.reset(); await drag('lead','/lead'); await generate();
+    await settings(); fixtures.reset(); await drag('lead','/lead'); await complete();
     assert.match(lastRequest().body.messages[1].content,/LEAD_OUTSIDE_SENTINEL/);
     assert.match(lastRequest().body.messages[1].content,/ARTICLE_A_SENTINEL/);
   });
   await check('M1-LONG resource limit rejects instead of truncating', async () => {
-    fixtures.reset(); await drag('resource','/resource'); await action(source,'summarize').click();
+    fixtures.reset(); await drag('resource','/resource');
     await until(async () => await status(source).getAttribute('data-phase')==='error','resource error absent');
     assert.match(await status(source).innerText(),/300,000|上限/); assert.equal(count(),0);
   });
   await check('M1-10 iframe navigation clears old summary without automatic traversal', async () => {
-    await settings({auto:true}); fixtures.reset(); const frame=await drag('article-a','/article-a'); await complete(); const before=count();
+    await settings(); fixtures.reset(); const frame=await drag('article-a','/article-a'); await complete(); const before=count();
     await frame.locator('#next-article').click(); await frame.waitForURL('**/article-b'); await sleep(1000);
     assert.equal(await summary(source).innerText(),''); assert.equal(count(),before); assert.match(await generate(),/ARTICLE_B_SENTINEL/);
   });
@@ -343,39 +341,39 @@ try {
     await frame.getByRole('heading',{name:'Dynamic content is ready'}).waitFor(); assert.match(await generate({force:true}),/DYNAMIC_ARTICLE_SENTINEL/);
   });
   await check('M1-11 login and empty body never call model', async () => {
-    await settings({auto:true}); fixtures.reset(); await drag('login','/login');
+    await settings(); fixtures.reset(); await drag('login','/login');
     await until(async () => await status(source).getAttribute('data-phase')==='error','login error absent'); assert.equal(count(),0);
     assert.match(await status(source).innerText(),/登录|验证/);
     await drag('empty','/empty'); await until(async () => await status(source).getAttribute('data-phase')==='error','empty error absent'); assert.equal(count(),0);
   });
   for(const [model,expected] of [['401',/401|403|Key/],['429',/429|受限/],['missing-model',/404|模型/],['incompatible',/格式|兼容/],['redirect',/网络|重定向/]]){
     await check('M1-11 actionable '+model+' without retries',async()=>{
-      await settings({model}); fixtures.reset(); const frame=await drag('article-a','/article-a'); await action(source,'summarize').click();
+      await settings({model}); fixtures.reset(); const frame=await drag('article-a','/article-a');
       await until(async()=>await status(source).getAttribute('data-phase')==='error','error absent'); assert.match(await status(source).innerText(),expected);
       await sleep(250); assert.equal(count(),1); assert.match(await frame.locator('article').innerText(),/ARTICLE_A_SENTINEL/);
     });
   }
   await check('M1-11 response headers timeout after 25 seconds',async()=>{
-    await settings({model:'timeout'}); fixtures.reset(); await drag('article-a','/article-a'); await action(source,'summarize').click();
+    await settings({model:'timeout'}); fixtures.reset(); await drag('article-a','/article-a');
     await until(async()=>await status(source).getAttribute('data-phase')==='error','timeout absent',30000);
     assert.match(await status(source).innerText(),/超时|25/); assert.equal(count(),1); assert.equal(lastRequest().aborted,true);
   });
   await check('M1-08 silent 45 seconds survives worker idle boundary',async()=>{
-    await settings({model:'silent'}); fixtures.reset(); await drag('article-a','/article-a'); await action(source,'summarize').click();
+    await settings({model:'silent'}); fixtures.reset(); await drag('article-a','/article-a');
     assert.match(await complete(source,55000),/ARTICLE_A_SENTINEL/); assert.equal(count(),1); assert.ok(Date.now()-lastRequest().startedAt>=45000);
     return 'Headers immediately; first SSE byte after 45 seconds; no background DevTools opened.';
   });
   await check('M1-11 forced worker stop requires manual retry',async()=>{
-    await settings({model:'slow'}); fixtures.reset(); await drag('article-a','/article-a'); await action(source,'summarize').click(); await until(()=>count()===1,'call absent');
+    await settings({model:'slow'}); fixtures.reset(); await drag('article-a','/article-a'); await until(()=>count()===1,'call absent');
     const cdp=await context.newCDPSession(options); await cdp.send('ServiceWorker.enable'); await cdp.send('ServiceWorker.stopAllWorkers'); await cdp.detach();
     await until(async()=>await status(source).getAttribute('data-phase')==='interrupted','interruption absent'); await sleep(350); assert.equal(count(),1); assert.equal(lastRequest().aborted,true);
     assert.match(await generate(),/ARTICLE_A_SENTINEL/); assert.equal(count(),2);
     worker=await until(()=>context.serviceWorkers().find(item=>item.url().includes(id)),'worker recovery absent');
   });
   await check('M1-12 API base and Key changes invalidate cache',async()=>{
-    await settings(); fixtures.reset(); await drag('article-a','/article-a'); await generate();
-    await settings({baseUrl:fixtures.origin+'/second/v1'}); await drag('article-a','/article-a'); await generate(); assert.equal(count(),2);
-    await settings({key:fakeKey+'-changed'}); await drag('article-a','/article-a'); await generate(); assert.equal(count(),3); await settings({key:fakeKey});
+    await settings(); fixtures.reset(); await drag('article-a','/article-a'); await complete();
+    await settings({baseUrl:fixtures.origin+'/second/v1'}); await drag('article-a','/article-a'); await complete(); assert.equal(count(),2);
+    await settings({key:fakeKey+'-changed'}); await drag('article-a','/article-a'); await complete(); assert.equal(count(),3); await settings({key:fakeKey});
   });
   await check('M1-13/14 Key DOM storage and network boundaries',async()=>{
     await settings(); const exported=await options.evaluate(()=>chrome.runtime.sendMessage({type:'settings:export'})); assert.ok(!JSON.stringify(exported).includes(fakeKey));
@@ -388,12 +386,12 @@ try {
     assert.ok(reads.every(entry=>entry.result===false)); assert.ok(report.network.every(req=>['localhost','127.0.0.1'].includes(new URL(req.url).hostname)));
   });
   await check('M1-10 source navigation aborts and never restores hidden generation',async()=>{
-    await settings({model:'slow'}); fixtures.reset(); await drag('article-a','/article-a'); await action(source,'summarize').click(); await until(()=>count()===1,'call absent');
+    await settings({model:'slow'}); fixtures.reset(); await drag('article-a','/article-a'); await until(()=>count()===1,'call absent');
     await source.goto(fixtures.origin+'/index?navigation=1'); await until(()=>lastRequest().aborted,'source nav did not abort'); assert.equal(await panel(source).count(),0); await sleep(700); assert.equal(count(),1);
     await source.goto(fixtures.origin+'/index');
   });
   await check('M1-15 redirect to ungranted final origin makes no model call',async()=>{
-    await settings({auto:true});
+    await settings();
     const manager = await context.newPage(); await manager.goto('chrome://extensions');
     await manager.evaluate(async id => {
       await chrome.developerPrivate.updateExtensionConfiguration({ extensionId: id, hostAccess: 'ON_CLICK' });
@@ -428,21 +426,21 @@ try {
     await until(() => options.locator('#save-settings').isEnabled(), 'settings after restart did not initialize');
   };
 
-  await check('M1-13/16 browser restart clears session Key and retains auto setting', async () => {
-    await settings({ auto: true, key: fakeKey });
+  await check('M1-13/16 browser restart clears session Key and retains the long-summary setting', async () => {
+    await settings({ autoLong: true, key: fakeKey });
     await restartBrowser();
     const view = await options.evaluate(() => chrome.runtime.sendMessage({ type: 'settings:get' }));
     assert.equal(view.hasKey, false);
-    assert.equal(view.settings.autoSummary, true);
+    assert.equal(view.settings.autoLongSummary, true);
     assert.equal(view.settings.rememberKey, false);
-    assert.equal(await options.locator('#auto-summary').isChecked(), true);
+    assert.equal(await options.locator('#auto-long-summary').isChecked(), true);
     const storage = await options.evaluate(() => Promise.all([chrome.storage.local.get(null), chrome.storage.session.get(null)]));
     assert.ok(!JSON.stringify(storage).includes(fakeKey));
-    return 'Same persistent browser profile restarted; session Key disappeared and automatic-summary switch stayed enabled.';
+    return 'Same persistent browser profile restarted; session Key disappeared and long-summary switch stayed enabled.';
   });
 
   await check('M1-13 remembered local Key survives restart and can be cleared', async () => {
-    await settings({ auto: true, remember: true, key: fakeKey });
+    await settings({ remember: true, key: fakeKey });
     await restartBrowser();
     let view = await options.evaluate(() => chrome.runtime.sendMessage({ type: 'settings:get' }));
     assert.equal(view.hasKey, true);

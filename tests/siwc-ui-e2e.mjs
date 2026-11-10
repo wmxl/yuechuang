@@ -52,8 +52,8 @@ try {
       calls: [], permissions: [], commands: [], copied: [], config: savedOAuth ? { provider: 'chatgptOAuth', model: 'gpt-6.1-terra' } : connectionCase === 'webMigration' ? { provider: 'chatgptOAuth', model: '' } : { provider: 'apiKey', model: '' },
       migration: connectionCase === 'webMigration' ? 'webModeRemoved' : undefined,
       settings: connectionCase === 'webMigration'
-        ? { baseUrl: 'https://example.test/v1', model: 'existing.api-model', autoSummary: true, rememberKey: true, inputBudgetTokens: 24000, autoLongSummary: false }
-        : { baseUrl: '', model: '', autoSummary: false, rememberKey: false, inputBudgetTokens: 16000, autoLongSummary: false },
+        ? { baseUrl: 'https://example.test/v1', model: 'existing.api-model', rememberKey: true, inputBudgetTokens: 24000, autoLongSummary: false }
+        : { baseUrl: '', model: '', rememberKey: false, inputBudgetTokens: 16000, autoLongSummary: false },
       hasKey: connectionCase === 'webMigration', failConnectionSave: connectionCase === 'apiFailure' ? 1 : 0,
       status: savedOAuth ? { state: 'ready', loggedIn: true, planAuthorized: true, models: [{ id: 'gpt-6.1-terra', label: 'GPT-6.1 Terra' }], generation: 'unchecked', helperVersion: 'mock-1' } : { ...emptyStatus }, loginResolve: undefined, ports: [], failLogout: '', holdStatus: location.search.includes('holdInitial'), failConnections: 0, connectionAttempts: 0,
       chat: { type: 'chat:state', messages: [], status: 'idle', hasKey: false, settingsReady: false, connection: 'chatgptOAuth', siwcStatus: { ...emptyStatus } },
@@ -70,6 +70,7 @@ try {
         mock.calls.push(copy(value));
         if (value.type === 'context:toolbar-sites') return { ok: true, sites: [] };
         if (value.type === 'settings:get') return { ok: true, settings: copy(mock.settings), hasKey: mock.hasKey, permissions: [], cacheCount: 0 };
+        if (value.type === 'settings:save') { mock.settings = copy(value.settings); return { ok: true }; }
         if (value.type === 'connection:get') return connectionView();
         if (value.type === 'connection:save') {
           if (mock.failConnectionSave > 0) { mock.failConnectionSave--; return { ok: false, error: '对话连接配置保存失败，请重试。' }; }
@@ -131,6 +132,26 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  await check('subscription users can save budgets and separate article-summary controls with no API credentials', async () => {
+    await page.goto(origin + '/options.html?connectionCase=oauthSwitch');
+    await page.waitForFunction(() => !document.querySelector('#save-settings').disabled && document.querySelector('#connection-oauth').checked);
+    assert.equal(await page.locator('#chat-output-budget').inputValue(), '8192');
+    await page.locator('#input-budget').fill('64000');
+    await page.locator('#chat-output-budget').fill('4096');
+    const summary = page.getByRole('region', { name: '文章摘要' });
+    assert.equal(await page.locator('#auto-summary').count(), 0);
+    await summary.locator('#auto-long-summary').check();
+    await page.locator('#save-settings').click();
+    await page.waitForFunction(() => document.querySelector('#save-state').textContent === '已保存到本机');
+    const saved = await page.evaluate(() => __siwcUi.calls.filter(value => value.type === 'settings:save'));
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].settings.inputBudgetTokens, 64000);
+    assert.equal(saved[0].settings.chatOutputTokens, 4096);
+    assert.equal(saved[0].settings.autoLongSummary, true);
+    assert.equal(saved[0].settings.baseUrl, '');
+    assert.equal(saved[0].settings.model, '');
+    assert.equal(saved[0].key, undefined);
+  });
   await check('saving API from a saved dotted OAuth model sends canonical neutral config without helper or model requests', async () => {
     await page.goto(origin + '/options.html?connectionCase=oauthSwitch');
     await page.waitForFunction(() => !document.querySelector('#save-connection').disabled);
@@ -176,7 +197,6 @@ try {
     assert.equal(await page.locator('#base-url').inputValue(), saved.settings.baseUrl);
     assert.equal(await page.locator('#model').inputValue(), saved.settings.model);
     assert.equal(await page.locator('#remember-key').isChecked(), true);
-    assert.equal(await page.locator('#auto-summary').isChecked(), true);
     assert.equal(await page.locator('#input-budget').inputValue(), '24000');
     assert.match(await page.locator('#key-status').innerText(), /已有本机 Key/);
     assert.equal(saved.hasKey, true);

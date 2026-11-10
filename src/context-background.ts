@@ -77,6 +77,9 @@ function cancel(job: ContextJob, reason: string) {
   job.state = { ...job.state, status: 'cancelled', error: reason, canExpand: false };
   emit(job);
 }
+export function hasActiveContextTask(): boolean {
+  return [...jobs.values()].some(job => ['reading', 'running'].includes(job.state.status));
+}
 /** Called synchronously before configuration/Key changes and connection tests. */
 export function cancelContextTasks(reason = '已停止生成。') {
   pendingSelections.clear();

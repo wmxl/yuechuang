@@ -7,8 +7,9 @@ export const secureStorage = Promise.all([
 ]);
 export async function readConfig(): Promise<{ settings: Settings; key: string }> {
   await secureStorage;
-  const [local, session] = await Promise.all([chrome.storage.local.get<{ settings?: Settings; apiKey?: string }>(['settings','apiKey']), chrome.storage.session.get<{apiKey?:string}>('apiKey')]);
-  const settings = { ...DEFAULT_SETTINGS, ...local.settings };
+  const [local, session] = await Promise.all([chrome.storage.local.get<{ settings?: Settings & { autoSummary?: boolean }; apiKey?: string }>(['settings','apiKey']), chrome.storage.session.get<{apiKey?:string}>('apiKey')]);
+  const { autoSummary: _legacyAutoSummary, ...savedSettings } = local.settings ?? {};
+  const settings = { ...DEFAULT_SETTINGS, ...savedSettings };
   return { settings, key: settings.rememberKey ? local.apiKey || '' : session.apiKey || '' };
 }
 export async function saveConfig(settings: Settings, suppliedKey?: string): Promise<void> {

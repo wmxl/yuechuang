@@ -46,32 +46,37 @@
               <div class="form-actions connection-save-actions" id="connection-save-actions"><button type="submit" class="button button-primary" id="save-connection">保存连接</button><span id="connection-save-state" class="save-state">正在读取…</span></div>
             </form>
           </section>
-          <section class="card" aria-labelledby="model-heading">
-            <div class="section-heading"><span class="step-number">01</span><div><h2 id="model-heading">模型 API 配置</h2><p>用于跨页研究，以及选择模型 API 时的对话、划词和摘要。兼容 Chat Completions 接口。</p></div></div>
-            <form id="settings-form">
-              <div class="field"><label for="base-url">API Base URL <span class="required-label">必填</span></label><input id="base-url" name="baseUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1" required aria-describedby="base-help endpoint-preview" /><p class="field-help" id="base-help">支持 HTTPS，或本机 localhost / 127.0.0.1 的 HTTP 接口。也可填写完整的 /chat/completions 地址。</p><p class="endpoint-preview" id="endpoint-preview">填写后显示实际请求地址</p></div>
-              <div class="field"><label for="model">模型标识 <span class="required-label">必填</span></label><input id="model" name="model" type="text" autocomplete="off" spellcheck="false" placeholder="填写服务商提供的模型名" required maxlength="200" /></div>
+          <form id="settings-form" class="primary-column">
+            <section class="card" aria-labelledby="model-heading">
+              <div class="section-heading"><span class="step-number">01</span><div><h2 id="model-heading">模型 API 与预算</h2><p>模型 API 兼容 Chat Completions 接口。使用 ChatGPT 订阅时，API 信息可以留空。</p></div></div>
+              <div class="field"><label for="base-url">API Base URL</label><input id="base-url" name="baseUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1" aria-describedby="base-help endpoint-preview" /><p class="field-help" id="base-help">支持 HTTPS，或本机 localhost / 127.0.0.1 的 HTTP 接口。也可填写完整的 /chat/completions 地址。</p><p class="endpoint-preview" id="endpoint-preview">填写后显示实际请求地址</p></div>
+              <div class="field"><label for="model">模型标识</label><input id="model" name="model" type="text" autocomplete="off" spellcheck="false" placeholder="填写服务商提供的模型名" maxlength="200" /></div>
               <div class="field"><div class="label-line"><label for="api-key">API Key</label><span id="key-status" class="key-status">正在读取…</span></div><input id="api-key" name="key" type="password" autocomplete="off" spellcheck="false" placeholder="在本机填写；留空保留已有 Key" aria-describedby="key-help" /><p class="field-help" id="key-help">保存后立即清空输入框，已有 Key 不回显。未配置 Key 时仍可预览原网页。</p></div>
               <label class="check-row" for="remember-key"><input id="remember-key" name="rememberKey" type="checkbox" /><span><strong>在这台电脑上记住 Key</strong><small>默认只在浏览器会话内保存。勾选后写入扩展本机存储，未做额外加密。</small></span></label>
               <div class="divider"></div>
-              <label class="check-row" for="auto-summary"><input id="auto-summary" name="autoSummary" type="checkbox" /><span><strong>拖动新链接后自动生成中文摘要</strong><small>默认关闭。开启后，正文就绪即向所配接口发送内容；预览内后续导航仍需手动总结。</small></span></label>
-              <div class="field budget-field"><label for="input-budget">单次上下文预算 <span class="required-label">估算 token</span></label><input id="input-budget" name="inputBudgetTokens" type="number" min="2048" max="128000" step="1" value="16000" required aria-describedby="budget-help" /><p class="field-help" id="budget-help">默认 16,000，范围 2,048—128,000。请低于所用模型的实际上下文上限；系统会预留提示和输出空间。未知模型使用带余量的保守估算，无法保证与服务商分词精确一致。</p></div>
+              <div class="field budget-field"><label for="input-budget">单次上下文预算 <span class="required-label">估算 token</span></label><input id="input-budget" name="inputBudgetTokens" type="number" min="2048" max="128000" step="1" value="64000" required aria-describedby="budget-help" /><p class="field-help" id="budget-help">两种连接共用。默认 64,000，范围 2,048—128,000，含输入、输出预留和估算余量。请按所用模型的实际上下文上限填写。</p></div>
+              <div class="field budget-field"><label for="chat-output-budget">对话输出预留 <span class="required-label">token</span></label><input id="chat-output-budget" name="chatOutputTokens" type="number" min="512" max="8192" step="1" value="8192" required aria-describedby="chat-output-help" /><p class="field-help" id="chat-output-help">默认 8,192。API 对话按剩余上下文空间申请输出，最多使用此值。ChatGPT 订阅使用此值估算剩余空间，实际输出上限由所选模型决定。</p></div>
+              <div class="form-actions"><button type="button" class="button button-secondary" id="test-connection">保存并测试连接</button></div>
+              <p class="action-help">测试连接会发送一次简短模型请求，可能产生接口费用。</p>
+              <div id="test-result" class="test-result" hidden><span class="result-label">接口返回</span><p id="test-text"></p></div>
+            </section>
+            <section class="card" aria-labelledby="summary-heading">
+              <div class="section-heading"><span class="step-number">02</span><div><h2 id="summary-heading">文章摘要</h2><p>拖动新链接后，正文就绪即使用当前连接生成中文摘要。预览内后续导航可手动总结。</p></div></div>
               <label class="check-row" for="auto-long-summary"><input id="auto-long-summary" name="autoLongSummary" type="checkbox" /><span><strong>允许自动摘要对长文发起多次模型请求</strong><small>默认关闭。超预算文章会按原文顺序分段，再逐层整合；开始前显示预计调用次数。开启后，自动摘要也可执行整组调用，可能增加费用；可随时停止，已产生的调用仍可能计费。</small></span></label>
               <p class="field-help summary-scope">摘要覆盖当前已加载、可访问并成功提取的可见正文。付费预览或分页会注明范围；达到 300,000 字符资源上限时停止并提示，不自动抓取隐藏内容。</p>
-              <div class="form-actions"><button type="submit" class="button button-primary" id="save-settings">保存配置 <span aria-hidden="true">↗</span></button><button type="button" class="button button-secondary" id="test-connection">保存并测试连接</button><span id="save-state" class="save-state" aria-live="polite"></span></div>
-              <p class="action-help">测试连接会发送一次简短模型请求，可能产生接口费用。</p>
-            </form>
-            <div id="test-result" class="test-result" hidden><span class="result-label">接口返回</span><p id="test-text"></p></div>
-          </section>
+              <div class="form-actions"><button type="submit" class="button button-primary" id="save-settings">保存配置 <span aria-hidden="true">↗</span></button><span id="save-state" class="save-state" aria-live="polite"></span></div>
+              <p class="action-help">同时保存上方的模型 API、预算和摘要设置。</p>
+            </section>
+          </form>
 
           <section class="card" id="website-access" aria-labelledby="hidden-sites-heading">
-            <div class="section-heading"><span class="step-number">02</span><div><h2 id="hidden-sites-heading">已隐藏划词工具条的网站</h2><p>在划词工具条的「×」里选择永久隐藏后，可在这里恢复。</p></div></div>
+            <div class="section-heading"><span class="step-number">03</span><div><h2 id="hidden-sites-heading">已隐藏划词工具条的网站</h2><p>在划词工具条的「×」里选择永久隐藏后，可在这里恢复。</p></div></div>
             <ul id="hidden-toolbar-sites" class="permission-list" aria-labelledby="hidden-sites-heading"></ul>
           </section>
         </div>
 
         <aside class="secondary-column">
-          <section class="card reading-note" aria-labelledby="usage-heading"><p class="eyebrow">准备好之后</p><h2 id="usage-heading">保持原页，向外看一眼。</h2><div class="preview-illustration" aria-hidden="true"><div class="mini-page"><i></i><b></b><span></span><span></span><span></span><span></span></div><div class="mini-preview"><div><i></i><i></i><i></i></div><b></b><span></span><span></span><em>中文摘要</em></div></div><p>在已授权网页上拖动一个链接，移入「预览」投放区后松开。页内预览窗会加载真实目标网页。</p><p>点击预览窗里的「总结」，或开启自动摘要。关闭预览后，继续原来的阅读。站点 CSP 阻止嵌入时，可在普通标签页打开。</p><div class="note-foot">普通点击与右键 Google 搜索可继续使用。</div></section>
+          <section class="card reading-note" aria-labelledby="usage-heading"><p class="eyebrow">准备好之后</p><h2 id="usage-heading">保持原页，向外看一眼。</h2><div class="preview-illustration" aria-hidden="true"><div class="mini-page"><i></i><b></b><span></span><span></span><span></span><span></span></div><div class="mini-preview"><div><i></i><i></i><i></i></div><b></b><span></span><span></span><em>中文摘要</em></div></div><p>在已授权网页上拖动一个链接，移入「预览」投放区后松开。页内预览窗会加载真实目标网页。</p><p>正文就绪后自动生成中文摘要。关闭预览后，继续原来的阅读。站点 CSP 阻止嵌入时，可在普通标签页打开。</p><div class="note-foot">普通点击与右键 Google 搜索可继续使用。</div></section>
 
           <section class="card data-card" aria-labelledby="data-heading"><h2 id="data-heading">本机数据</h2><div class="cache-counter"><strong id="cache-count">—</strong><span>条会话摘要缓存</span></div><p class="field-help">缓存仅用于当前浏览器会话去重，不保留永久聊天历史。</p><div class="data-actions"><button type="button" class="text-button" id="clear-cache">清空会话摘要缓存 <span aria-hidden="true">↗</span></button><button type="button" class="text-button" id="export-settings">导出配置（不含 Key）<span aria-hidden="true">↗</span></button><button type="button" class="text-button destructive" id="clear-key">清除已保存 Key <span aria-hidden="true">↗</span></button></div></section>
 

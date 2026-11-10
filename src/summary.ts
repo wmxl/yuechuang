@@ -1,5 +1,5 @@
 import { requestCompletion, type CompletionMessage } from './model';
-import type { Article, Settings, SummaryPlan, SummaryProgress } from './shared';
+import { DEFAULT_SETTINGS, type Article, type Settings, type SummaryPlan, type SummaryProgress } from './shared';
 
 export const SUMMARY_DEADLINE_MS = 12 * 60_000;
 export const SUMMARY_RESOURCE_LIMIT = 300_000;
@@ -58,7 +58,7 @@ interface Layout { plan: SummaryPlan; segments: string[]; output: number; noteLi
 function layout(article: Article, settings: Settings, maxMessageCharacters: number): Layout {
   if (!article.text.trim()) throw new Error('未取得足够正文，无法规划摘要。');
   if (article.text.length >= SUMMARY_RESOURCE_LIMIT) throw new Error('正文达到 300,000 字符资源上限，已停止处理；本次没有生成全文摘要。请选择较小范围后手动重试。');
-  const budget = settings.inputBudgetTokens ?? 16_000;
+  const budget = settings.inputBudgetTokens ?? DEFAULT_SETTINGS.inputBudgetTokens;
   if (!Number.isInteger(budget) || budget < 2048 || budget > 128_000) throw new Error('单次预算应为 2,048—128,000 的整数。');
   const output = Math.max(512, Math.min(1536, Math.floor(budget / 5)));
   const base = { estimatedTokens: estimateTokens(article.text), characters: article.text.length };

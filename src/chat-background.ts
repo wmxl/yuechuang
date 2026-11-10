@@ -1,5 +1,5 @@
 import { allowedUrl, validateSettings } from './core';
-import { requestCompletion } from './model';
+import { CompletionLengthError, requestCompletion } from './model';
 import { readConfig, secureStorage } from './store';
 import { planChat } from './chat-model';
 import { CHAT_PORT, CHAT_SESSION_KEY, MAX_CHAT_INPUT, MAX_CHAT_MESSAGES, MAX_CHAT_OUTPUT, chatPageQuote, type ChatCommand, type ChatMessage, type ChatQuoteSource, type ChatReadingEvent, type ChatState, type SearchUpdate } from './chat-shared';
@@ -8,6 +8,7 @@ import { sanitizeChatDetails } from './chat-details';
 import { getChatConnectionView } from './chat-connection';
 import type { ChatConnection } from './chat-connection-shared';
 import { ensureSiwcReady, getSiwcView, requestSiwc } from './siwc-background';
+import { SiwcFailure } from './siwc-protocol';
 import type { SiwcView } from './siwc-shared';
 
 interface Job { id: string; owner: chrome.runtime.Port; controller: AbortController; assistant?: ChatMessage; key: string; connection?: ChatConnection }
@@ -248,7 +249,12 @@ async function send(port: chrome.runtime.Port, input: unknown, quoteSource?: Cha
       applySiwc(await getSiwcView());
       if (revision !== failedRevision) return;
     }
-    state.status = 'error'; state.error = errorText(error, active.key); emit();
+    state.status = 'error';
+    const lengthLimited = error instanceof CompletionLengthError || error instanceof SiwcFailure && error.code === 'length';
+    state.error = lengthLimited
+      ? `模型输出达到长度上限，回答尚未完成。${active.assistant?.content.trim() ? '已保留收到的片段。' : ''}请重新发送原问题，或缩小回答范围后重试。`
+      : errorText(error, active.key);
+    emit();
     const savedRevision = revision;
     try { await persist(); }
     catch { if (revision === savedRevision) { state.error = '无法保存会话进度，本次请求已停止。请检查扩展存储后手动重试。'; emit(); } }

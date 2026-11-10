@@ -22,7 +22,7 @@ test('endpoint restricts schemes, credentials, queries and preserves complete pa
   assert.equal(apiEndpoint('http://127.0.0.1:4317/v1/chat/completions'), 'http://127.0.0.1:4317/v1/chat/completions');
   for (const value of ['http://evil.test/v1', 'javascript:alert(1)', 'file:///secret', 'https://u:p@host/v1', 'https://a.test/v1?key=x', 'https://a.test/#secret']) assert.throws(() => apiEndpoint(value));
   assert.throws(() => allowedUrl('https://chromewebstore.google.com/detail/x'));
-  assert.throws(() => validateSettings({ ...DEFAULT_SETTINGS, autoSummary: 'yes' }));
+  assert.throws(() => validateSettings({ ...DEFAULT_SETTINGS, rememberKey: 'yes' }));
 });
 test('cache identity binds endpoint, key, content and model', async () => {
   const config = { ...DEFAULT_SETTINGS, baseUrl: 'https://one.test/v1', model: 'model' };

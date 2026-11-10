@@ -115,7 +115,6 @@ async function settings(model = 'normal', key) {
   await options.bringToFront(); await until(() => options.locator('#save-settings').isEnabled(), 'settings unavailable');
   await options.locator('#base-url').fill(fixtures.origin + '/v1');
   await options.locator('#model').fill(model);
-  await options.locator('#auto-summary').setChecked(false);
   await options.locator('#remember-key').setChecked(false);
   await options.locator('#input-budget').fill('16000');
   await options.locator('#auto-long-summary').setChecked(false);

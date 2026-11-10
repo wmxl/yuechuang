@@ -15,6 +15,7 @@ const session: Record<string, unknown> = { apiKey: KEY };
 const connected = new Hub<[chrome.runtime.Port]>();
 const requests: Record<string, unknown>[] = [];
 let failed = false;
+let lengthLimited = false;
 function area(values: Record<string, unknown>) { return {
   async setAccessLevel() {},
   async get(names: string | string[]) { return structuredClone(Object.fromEntries((Array.isArray(names) ? names : [names]).map(name => [name, values[name]]))); },
@@ -57,14 +58,21 @@ before(async () => {
     permissions: { async contains() { return true; } }
   } });
   globalThis.fetch = async (url, init) => {
+    if (String(url) === 'https://model.test/v1/chat/completions') {
+      assert.equal((init?.headers as Record<string, string>).Authorization, `Bearer ${KEY}`);
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response('data: {"choices":[{"delta":{"content":"未完成片段"},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
+    }
     assert.equal((init?.headers as Record<string, string>).Authorization, `Bearer ${TOKEN}`);
     if (String(url).endsWith('/v1/models')) return Response.json({ models: [{ slug: 'gpt-selected', display_name: 'Selected model', visibility: 'list' }] });
     assert.equal(String(url), 'https://api.openai.com/v1/responses');
     requests.push(JSON.parse(String(init?.body)));
     const events = [
       { type: 'response.created', response: { id: `response-${requests.length}`, model: KEY } },
-      { type: 'response.output_text.delta', delta: failed ? '未完成片段' : '完整回答' },
-      failed
+      { type: 'response.output_text.delta', delta: failed || lengthLimited ? '未完成片段' : '完整回答' },
+      lengthLimited
+        ? { type: 'response.incomplete', response: { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } } }
+        : failed
         ? { type: 'response.failed', response: { error: { code: 'rate_limit_exceeded' }, usage: { input_tokens: 99999 }, model: 'gpt-failed' } }
         : { type: 'response.completed', response: { id: `response-${requests.length}`, object: 'response', created_at: 1, status: 'completed', error: null, output: [], text: { format: { type: 'text' } }, model: 'gpt-server-version', usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 0, private: TOKEN }, output_tokens: 20, output_tokens_details: { reasoning_tokens: 5 }, total_tokens: 120, private: TOKEN }, private: TOKEN } }
     ];
@@ -124,4 +132,28 @@ test('failed response does not publish unconfirmed usage or overwrite earlier co
   assert.equal(requests.length, 3);
   assert.ok(!JSON.stringify([local, session, port.sent]).includes(TOKEN));
   port.disconnect();
+});
+
+test('both connections keep truncated answers and tell the user to resend the original question', async () => {
+  failed = false;
+  lengthLimited = true;
+  const before = requests.length;
+  const oauth = await connect();
+  const subscriptionState = await send(oauth, '请翻译成英文');
+  oauth.disconnect();
+  local.webChatConfig = { provider: 'apiKey', model: '' };
+  local.settings = { ...DEFAULT_SETTINGS, baseUrl: 'https://model.test/v1', model: 'test-chat' };
+  const api = await connect();
+  const apiState = await send(api, '请翻译成英文');
+  api.disconnect();
+  assert.equal(requests.length, before + 2);
+  assert.equal(requests[before].max_output_tokens, undefined);
+  assert.equal(requests[before + 1].max_tokens, 8192);
+  for (const state of [subscriptionState, apiState]) {
+    assert.equal(state.status, 'error');
+    assert.equal(state.messages.at(-1)?.content, '未完成片段');
+    assert.equal(state.messages.at(-1)?.status, 'error');
+    assert.match(state.error!, /长度上限.*已保留收到的片段.*重新发送原问题/);
+  }
+  assert.equal(subscriptionState.error, apiState.error);
 });

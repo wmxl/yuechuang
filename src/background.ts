@@ -3,10 +3,10 @@ import { generate } from './model';
 import { planSummary, summarizeArticle, type SummaryTransport } from './summary';
 import { clearCache, clearKey, readCache, readConfig, saveConfig, secureStorage, writeCache, type Preview } from './store';
 import type { Article, PreviewEvent, SettingsView } from './shared';
-import { cancelContextTasks, forgetSavedPhrase, initializeContextMenus } from './context-background';
+import { cancelContextTasks, forgetSavedPhrase, hasActiveContextTask, initializeContextMenus } from './context-background';
 import { CONTEXT_PORT } from './context-shared';
 import { listPhrases, deletePhrase } from './phrases';
-import { cancelResearch, initializeResearch } from './research-background';
+import { cancelResearch, hasActiveResearch, initializeResearch } from './research-background';
 import { RESEARCH_PORT } from './research-shared';
 import { trustedPage } from './trusted-page';
 import { cancelChat, initializeChat } from './chat-background';
@@ -144,11 +144,10 @@ async function openPreview(url: unknown, sender: chrome.runtime.MessageSender) {
   if (typeof url !== 'string' || url.length > 8192) throw new Error('链接无效。');
   const target = allowedUrl(url).href;
   const tab = await sourceTab(sender);
-  const config = await readConfig();
   await closePreview();
   const canRead = await permitted(target);
   await sourceTab(sender);
-  const current: Preview = { mode: 'inline', id: crypto.randomUUID(), tabId: tab.id!, sourceDocumentId: sender.documentId!, sourceWindowId: tab.windowId, revision: 0, url: target, autoEligible: config.settings.autoSummary, activeTask: false, interrupted: false };
+  const current: Preview = { mode: 'inline', id: crypto.randomUUID(), tabId: tab.id!, sourceDocumentId: sender.documentId!, sourceWindowId: tab.windowId, revision: 0, url: target, autoEligible: canRead, activeTask: false, interrupted: false };
   preview = current;
   try {
     await installFrameRule(tab.url!, target, tab.id!);
@@ -213,9 +212,13 @@ async function summarize(message: { force?: boolean; automatic?: boolean; allowM
   await currentSource(sourcePort.sender!);
   if (port !== sourcePort || !preview) return;
   if (task && task.previewId === preview.id && !message.force) { send(task.state); return; }
-  cancelResearch('已切换到文章摘要。');
-  cancelContextTasks('已切换到文章摘要。');
-  cancel(); testController?.abort();
+  if (message.automatic && !preview.autoEligible) { if (state) send(state); return; }
+  preview.autoEligible = false;
+  if (!message.automatic) {
+    cancelResearch('已切换到文章摘要。');
+    cancelContextTasks('已切换到文章摘要。');
+    cancel(); testController?.abort();
+  }
   const current: Task = { id: crypto.randomUUID(), previewId: preview.id, controller: new AbortController(), state: { type: 'summary:state', requestId: '', status: 'reading', text: '' } };
   current.state.requestId = current.id; task = current; state = current.state;
   preview.activeTask = true; await persist(); checkTask(current); send(current.state);
@@ -233,7 +236,6 @@ async function summarize(message: { force?: boolean; automatic?: boolean; allowM
     const { config: connection } = await getChatConnectionView(); checkTask(current);
     current.usesSubscription = connection.provider === 'chatgptOAuth';
     const { settings, key } = await readConfig(); checkTask(current);
-    if (message.automatic && !settings.autoSummary) throw new Error('自动总结已关闭，可手动总结。');
     if (!current.usesSubscription) {
       if (!settings.baseUrl || !settings.model || !key) throw new Error('请先在设置中填写接口、模型和 API Key。原网页仍可阅读。');
       if (!(await permitted(settings.baseUrl))) throw new Error('缺少模型接口域权限，请在 Chrome 的扩展详情中检查阅窗的网站访问权限。');
@@ -243,14 +245,12 @@ async function summarize(message: { force?: boolean; automatic?: boolean; allowM
     checkTask(current);
     const ck = await cacheKey(article.url, JSON.stringify(article), settings, key, subscription); checkTask(current);
     const cached = message.force ? undefined : (await readCache()).find(entry => entry.key === ck); checkTask(current);
-    if (message.automatic && !preview!.autoEligible) throw new Error('本次自动总结已经尝试过，请手动重试。');
     const transport: SummaryTransport | undefined = subscription ? {
       maxMessageCharacters: SIWC_MAX_MESSAGE_CHARACTERS,
       complete: (input, signal, onText) => requestSiwc(input, signal, onText, undefined, 'summary'),
     } : undefined;
     const plan = planSummary(article, settings, transport?.maxMessageCharacters);
     if (cached) {
-      preview!.autoEligible = false;
       send({ type: 'summary:plan', plan: { ...plan, requests: 0 }, needsConfirmation: false });
       state = current.state = { ...current.state, status: 'done', text: cached.text, cached: true }; send(state); return;
     }
@@ -259,10 +259,13 @@ async function summarize(message: { force?: boolean; automatic?: boolean; allowM
       state = current.state = { ...current.state, status: 'planned', error: `全文需要预计 ${plan.requests} 次模型调用。确认后按全部已读取正文分段处理。` };
       send(state); send({ type: 'summary:plan', plan, needsConfirmation: true }); return;
     }
-    preview!.autoEligible = false; preview!.interrupted = false;
+    preview!.interrupted = false;
+    await persist(); checkTask(current);
+    if (message.automatic && (hasActiveResearch() || hasActiveContextTask() || testController && !testController.signal.aborted)) {
+      throw new Error('其他模型任务正在进行。任务结束后可点击「总结」。');
+    }
     state = current.state = { ...current.state, status: 'running', text: '' }; send(state);
     send({ type: 'summary:plan', plan, needsConfirmation: false });
-    await persist(); checkTask(current);
     const text = await summarizeArticle(settings, key, article, current.controller.signal, text => {
       if (task === current && identity() === current.identity) { state = current.state = { ...current.state, text }; send(state); }
     }, progress => { if (task === current && identity() === current.identity) send({ type: 'summary:progress', progress }); },
@@ -362,9 +365,7 @@ chrome.runtime.onConnect.addListener(connection => {
     if (!connected || !preview) throw new Error('非当前预览。');
     const id = preview.id;
     const previous = port; port = undefined; previous?.disconnect(); port = connection;
-    const config = await readConfig();
-    if (!connected || port !== connection || preview?.id !== id) return;
-    connection.postMessage({ type: 'preview:init', previewId: id, revision: preview.revision, url: preview.url, autoSummary: preview.autoEligible && config.settings.autoSummary && !task && !state, interrupted: preview.interrupted } satisfies PreviewEvent);
+    connection.postMessage({ type: 'preview:init', previewId: id, revision: preview.revision, url: preview.url, autoSummary: preview.autoEligible && !task && !state, interrupted: preview.interrupted } satisfies PreviewEvent);
     connection.postMessage({ type: 'preview:page', previewId: id, revision: preview.revision, url: preview.url, status: frameFailure ? 'error' : preview.documentId ? 'ready' : 'loading', error: frameFailure || undefined } satisfies PreviewEvent);
     if (state) connection.postMessage(state);
   })();

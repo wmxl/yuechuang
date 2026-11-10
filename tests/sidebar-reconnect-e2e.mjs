@@ -68,7 +68,7 @@ async function configure(model = 'normal') {
   const frame = await select('settings');
   await frame.locator('#base-url').fill(fixtures.origin + '/v1'); await frame.locator('#model').fill(model);
   await frame.locator('#api-key').fill(fakeKey); await frame.locator('#remember-key').setChecked(false);
-  await frame.locator('#auto-summary').setChecked(false); await frame.locator('#auto-long-summary').setChecked(false);
+  await frame.locator('#auto-long-summary').setChecked(false);
   await frame.locator('#save-settings').click();
   await until(async () => { const result = await frame.evaluate(() => chrome.runtime.sendMessage({ type: 'settings:get' })); return result.ok && result.hasKey && result.settings.model === model && await frame.locator('#save-settings').isEnabled(); }, 'settings not saved');
   await select('chat'); await until(() => shell.locator('#chat-setup').isHidden(), 'chat config did not refresh');

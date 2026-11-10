@@ -38,6 +38,9 @@ async function closeTab(active: Job): Promise<void> {
   // The tab was created for this task. Keep it if the user navigated it elsewhere.
   try { const actual = await chrome.tabs.get(tab.id); if (actual.url === tab.url || actual.pendingUrl === tab.url) await chrome.tabs.remove(tab.id); } catch { /* Already closed. */ }
 }
+export function hasActiveResearch(): boolean {
+  return researchActive(latest);
+}
 export function cancelResearch(reason = '已停止研究，已完成的来源证据保留。'): void {
   ++epoch;
   const active = job;

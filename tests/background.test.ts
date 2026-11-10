@@ -189,6 +189,38 @@ test('summary reads exact target document and ignores a forged Article sent by t
   assert.ok(!String(requests[0].init.body).includes('FORGED_SOURCE_ARTICLE')); assert.ok(!JSON.stringify(messages).includes(KEY)); assert.ok(!JSON.stringify(port.sent).includes(KEY)); assert.equal(requests[0].url, API + '/chat/completions');
 });
 
+test('a new preview auto-summarizes once even when the old setting was off', async () => {
+  local.settings = { ...config, autoSummary: false };
+  const { port } = await opened();
+  const init = port.sent.find(event => event.type === 'preview:init');
+  assert.equal(init?.autoSummary, true);
+  assert.deepEqual(await send({ type: 'settings:export' }), { ok: true, settings: config });
+  port.command({ type: 'summary:start', automatic: true });
+  assert.equal((await finish(port)).status, 'done');
+  const reconnect = await connect();
+  assert.equal(reconnect.sent.find(event => event.type === 'preview:init')?.autoSummary, false);
+  reconnect.command({ type: 'summary:start', automatic: true });
+  await settle();
+  assert.equal(messages.filter(item => item.message.type === 'frame:extract').length, 1);
+  assert.equal(requests.length, 1);
+});
+
+test('automatic summary leaves an active connection test running and supports a manual summary afterward', async () => {
+  const pending = paused(); fetchGate = pending;
+  const connectionTest = send({ type: 'settings:test' }); await pending.reached.promise;
+  const { port } = await opened();
+  port.command({ type: 'summary:start', automatic: true });
+  const skipped = await finish(port);
+  assert.equal(skipped.status, 'error'); assert.match(skipped.error!, /其他模型任务正在进行/);
+  assert.equal(requests.length, 1); assert.equal(requests[0].init.signal?.aborted, false);
+  pending.release.resolve();
+  assert.equal((await connectionTest).ok, true);
+  const baseline = states(port).length;
+  port.command({ type: 'summary:start' });
+  assert.equal((await finish(port, baseline)).status, 'done');
+  assert.equal(requests.length, 2);
+});
+
 test('a copied preview name cannot bind an initial frame at another URL', async () => {
   const preview = await open(); frames.set(9, { url: NEXT, documentId: 'copied-name', parentFrameId: 0, errorOccurred: false });
   const reply = await send({ type: 'frame:hello', name: `local-reader-${preview.id}` }, frameSender(9));
@@ -196,8 +228,8 @@ test('a copied preview name cannot bind an initial frame at another URL', async 
   await bind(preview.id); assert.equal((await connect()).disconnected, false);
 });
 
-test('source navigation while opening configuration cannot leave an orphan preview or frame rule', async () => {
-  const pending = paused(); configGate = pending; const opening = send({ type: 'preview:open', url: TARGET }, frameSender(0)); await pending.reached.promise;
+test('source navigation while opening a preview cannot leave an orphan preview or frame rule', async () => {
+  const pending = paused(); permissionGate = pending; const opening = send({ type: 'preview:open', url: TARGET }, frameSender(0)); await pending.reached.promise;
   frames.set(0, { url: SOURCE, documentId: 'new-source', parentFrameId: -1, errorOccurred: false });
   committed.emit({ tabId: 1, frameId: 0, documentId: 'new-source', url: SOURCE }); await settle(); pending.release.resolve();
   assert.equal((await opening).ok, false); assert.equal(session.preview, undefined); assert.equal(rules.size, 0); assert.equal(requests.length, 0);

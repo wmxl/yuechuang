@@ -1,5 +1,7 @@
-export interface Settings { baseUrl: string; model: string; autoSummary: boolean; rememberKey: boolean; inputBudgetTokens: number; autoLongSummary: boolean }
-export const DEFAULT_SETTINGS: Settings = { baseUrl: '', model: '', autoSummary: false, rememberKey: false, inputBudgetTokens: 16000, autoLongSummary: false };
+export const MIN_CHAT_OUTPUT_TOKENS = 512;
+export const MAX_CHAT_OUTPUT_TOKENS = 8192;
+export interface Settings { baseUrl: string; model: string; rememberKey: boolean; inputBudgetTokens: number; autoLongSummary: boolean; chatOutputTokens: number }
+export const DEFAULT_SETTINGS: Settings = { baseUrl: '', model: '', rememberKey: false, inputBudgetTokens: 64_000, autoLongSummary: false, chatOutputTokens: MAX_CHAT_OUTPUT_TOKENS };
 export interface Article { title: string; url: string; text: string; truncated: boolean; originalLength: number; description?: string; headings?: string[]; coverage?: 'visible'|'partial'; notice?: string }
 export interface SummaryPlan { strategy: 'direct'|'sections'; segments: number; requests: number; estimatedTokens: number; characters: number }
 export interface SummaryProgress { stage: 'reading'|'section'|'merge'; current: number; total: number }

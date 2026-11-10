@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "阅窗 · 本机阅读助手",
   "description": "点击打开阅窗侧边栏：直接对话、跨页研究、词句收藏与设置，使用自己的模型接口，本机保存资料。",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "minimum_chrome_version": "120",
   "permissions": [
     "storage",

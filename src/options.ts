@@ -19,8 +19,8 @@ const baseInput = element<HTMLInputElement>('base-url');
 const modelInput = element<HTMLInputElement>('model');
 const keyInput = element<HTMLInputElement>('api-key');
 const rememberInput = element<HTMLInputElement>('remember-key');
-const autoInput = element<HTMLInputElement>('auto-summary');
 const budgetInput = element<HTMLInputElement>('input-budget');
+const chatOutputInput = element<HTMLInputElement>('chat-output-budget');
 const autoLongInput = element<HTMLInputElement>('auto-long-summary');
 const feedback = element<HTMLDivElement>('feedback');
 const saveState = element<HTMLSpanElement>('save-state');
@@ -71,7 +71,7 @@ function report(text: string, kind: 'success' | 'error' | 'info' = 'success'): v
 }
 
 function readSettings(): Settings {
-  return { baseUrl: baseInput.value.trim(), model: modelInput.value.trim(), autoSummary: autoInput.checked, rememberKey: rememberInput.checked, inputBudgetTokens: Number(budgetInput.value), autoLongSummary: autoLongInput.checked };
+  return { baseUrl: baseInput.value.trim(), model: modelInput.value.trim(), rememberKey: rememberInput.checked, inputBudgetTokens: Number(budgetInput.value), autoLongSummary: autoLongInput.checked, chatOutputTokens: Number(chatOutputInput.value) };
 }
 
 function endpointFor(value: string): string {
@@ -147,11 +147,11 @@ async function refresh(replaceForm: boolean): Promise<SettingsView> {
   if (!view.settings || !Array.isArray(view.permissions)) throw new Error('设置读取失败，请重新加载扩展。');
   hasKey = view.hasKey;
   if (replaceForm) {
-    savedSettings = { ...view.settings };
+    savedSettings = { ...DEFAULT_SETTINGS, ...view.settings };
     baseInput.value = view.settings.baseUrl;
     modelInput.value = view.settings.model;
-    autoInput.checked = view.settings.autoSummary;
     budgetInput.value = String(view.settings.inputBudgetTokens ?? DEFAULT_SETTINGS.inputBudgetTokens);
+    chatOutputInput.value = String(view.settings.chatOutputTokens ?? DEFAULT_SETTINGS.chatOutputTokens);
     autoLongInput.checked = view.settings.autoLongSummary ?? false;
     rememberInput.checked = view.settings.rememberKey;
     loaded = true;
@@ -407,16 +407,18 @@ element('siwc-logout').addEventListener('click', () => {
   });
 });
 
-async function save(): Promise<void> {
-  if (!form.reportValidity()) throw new Error('请补全接口地址和模型标识。');
+async function save(testing = false): Promise<void> {
+  if (!form.reportValidity()) throw new Error('请检查配置中的地址和预算。');
   const settings = readSettings();
-  endpointFor(settings.baseUrl);
-  if (!settings.model) throw new Error('请填写模型标识。');
   const key = keyInput.value.trim();
+  if (testing || selectedProvider() === 'apiKey' || settings.baseUrl || settings.model || key) {
+    endpointFor(settings.baseUrl);
+    if (!settings.model) throw new Error('请填写模型标识。');
+  }
   await message('settings:save', { settings, ...(key ? { key } : {}) });
   if (keyInput.value.trim() === key) keyInput.value = '';
   const view = await refresh(false);
-  savedSettings = { ...view.settings };
+  savedSettings = { ...DEFAULT_SETTINGS, ...view.settings };
   loaded = true;
   // Preserve any newer edits made while the background was saving.
   if (JSON.stringify(readSettings()) === JSON.stringify(settings)) {
@@ -441,7 +443,7 @@ form.addEventListener('change', updateDirty);
 
 testButton.addEventListener('click', () => {
   void perform(async () => {
-    await save();
+    await save(true);
     testButton.textContent = '正在测试连接…';
     element('test-result').hidden = true;
     report('正在向已配置的接口发送一次测试请求…', 'info');
@@ -473,7 +475,7 @@ element('export-settings').addEventListener('click', () => {
   void perform(async () => {
     const result = await message('settings:export');
     const settings = result.settings as Settings;
-    const exported: Settings = { baseUrl: settings.baseUrl, model: settings.model, autoSummary: settings.autoSummary, rememberKey: settings.rememberKey, inputBudgetTokens: settings.inputBudgetTokens, autoLongSummary: settings.autoLongSummary };
+    const exported: Settings = { baseUrl: settings.baseUrl, model: settings.model, rememberKey: settings.rememberKey, inputBudgetTokens: settings.inputBudgetTokens, autoLongSummary: settings.autoLongSummary, chatOutputTokens: settings.chatOutputTokens };
     const url = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2) + '\n'], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
