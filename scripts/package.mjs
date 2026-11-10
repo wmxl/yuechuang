@@ -1,4 +1,4 @@
-import { readdir, readFile, mkdir, writeFile, copyFile } from 'node:fs/promises';
+import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { zipSync } from 'fflate';
 async function entries(dir, prefix = '') {
   const files = {};
@@ -14,5 +14,4 @@ const manifest = JSON.parse(await readFile('dist/manifest.json', 'utf8'));
 if (!/^\d+\.\d+\.\d+$/.test(manifest.version)) throw new Error('Invalid release version');
 const archive = `release/reading-assistant-${manifest.version}.zip`;
 await writeFile(archive, zipSync(await entries('dist')));
-await copyFile('docs/安装与使用说明.md', `release/阅窗-${manifest.version}-安装与使用说明.md`);
 console.log(archive);
