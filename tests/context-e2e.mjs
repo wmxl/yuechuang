@@ -446,6 +446,116 @@ try {
       await shell.close();
     }
   });
+  await check('sidebar quick actions send the quote or pasted text and preserve unrelated drafts', async () => {
+    const shell = await context.newPage();
+    try {
+      await shell.setViewportSize({ width: 300, height: 700 });
+      await shell.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+      const composer = shell.locator('#chat-input');
+      const quote = shell.locator('#chat-page-quote-text');
+      const translate = shell.locator('#chat-translate');
+      const explain = shell.locator('#chat-explain');
+      const stop = shell.locator('#chat-stop');
+      await until(() => composer.isEnabled(), 'side panel chat did not connect');
+      assert.equal(await translate.isDisabled(), true);
+      assert.equal(await explain.isDisabled(), true);
+      await gotoContext(); fixtures.reset();
+      await selectToolbar(source, '#term-a');
+      await until(async () => await quote.innerText() === 'coherence', 'translation quote missing');
+      assert.equal(count(), 0, 'selecting text must not call the model');
+      assert.equal(await shell.locator('#chat-send').isDisabled(), true);
+      await translate.click();
+      await stop.waitFor({ state: 'visible' });
+      assert.equal(await explain.isDisabled(), true);
+      await until(() => count() === 1 && latest().completed, 'translation did not complete');
+      await stop.waitFor({ state: 'hidden' });
+      await quote.waitFor({ state: 'hidden' });
+      assert.match(latest().body.messages.at(-1).content, /^网页选区引用（仅供参考）：\ncoherence\n\n我的问题：\n请翻译/u);
+
+      await selectToolbar(source, '#term-b');
+      await until(async () => await quote.innerText() === 'microtasks', 'explanation quote missing');
+      await composer.fill('保留这条草稿');
+      await explain.click();
+      await until(() => count() === 2 && latest().completed, 'explanation did not complete');
+      await stop.waitFor({ state: 'hidden' });
+      await quote.waitFor({ state: 'hidden' });
+      const sent = latest().body.messages.at(-1).content;
+      assert.match(sent, /^网页选区引用（仅供参考）：\nmicrotasks\n\n我的问题：\n请用通俗的中文解释/u);
+      assert.doesNotMatch(sent, /保留这条草稿/u);
+      assert.equal(await composer.inputValue(), '保留这条草稿');
+
+      await composer.fill('The event loop.');
+      await translate.click();
+      await until(() => count() === 3 && latest().completed, 'pasted text translation did not complete');
+      assert.match(latest().body.messages.at(-1).content, /^请翻译[\s\S]*\n待处理文本：\nThe event loop\.$/u);
+      assert.equal(await composer.inputValue(), '');
+    } finally {
+      await shell.close();
+    }
+  });
+  await check('sidebar model recommendations follow the active passage and send one term with the full quote on click', async () => {
+    const shell = await context.newPage();
+    const secondShell = await context.newPage();
+    try {
+      await shell.setViewportSize({ width: 320, height: 700 });
+      await shell.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+      await secondShell.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+      const composer = shell.locator('#chat-input');
+      const chips = shell.locator('#chat-quote-terms button');
+      const quote = shell.locator('#chat-page-quote-text');
+      const conversation = shell.locator('#chat-messages .chat-message');
+      await until(() => composer.isEnabled(), 'side panel chat did not connect');
+      await until(() => secondShell.locator('#chat-input').isEnabled(), 'second side panel chat did not connect');
+      const messageCount = await conversation.count();
+      await composer.fill('这条草稿不能发给推荐模型');
+      await gotoContext(); fixtures.reset();
+      const first = (await realSelect(source, '#ctx-a', { paragraph: true })).trim();
+      await until(async () => (await quote.innerText()) === first, 'first recommendation quote missing');
+      await until(() => count() >= 1, 'first recommendation request missing');
+      const old = latest();
+      assert.deepEqual(old.body.messages.map(message => message.role), ['system', 'user']);
+      assert.deepEqual(JSON.parse(old.body.messages[1].content), { quote: first });
+      assert.equal(await shell.locator('#chat-translate').isEnabled(), true);
+
+      const second = (await realSelect(source, '#ctx-b', { paragraph: true })).trim();
+      await until(() => old.aborted, 'old recommendation request was not cancelled');
+      await until(async () => (await chips.count()) === 3, 'recommendations for the new quote missing');
+      await until(async () => (await secondShell.locator('#chat-quote-terms button').count()) === 3, 'second panel did not receive the shared result');
+      assert.equal(count(), 2);
+      assert.deepEqual(JSON.parse(latest().body.messages[1].content), { quote: second });
+      assert.deepEqual(await chips.allTextContents(), ['microtasks', 'event loop', 'rendering']);
+      assert.equal(await conversation.count(), messageCount, 'recommendations must stay out of the conversation');
+      assert.equal(await shell.evaluate(() => document.querySelector('.composer-tools').scrollWidth <= document.querySelector('.composer-tools').clientWidth), true);
+
+      await shell.getByRole('button', { name: 'event loop', exact: true }).click();
+      await until(() => count() === 3 && latest().completed, 'term follow-up did not complete');
+      const sent = latest().body.messages.at(-1).content;
+      assert.ok(sent.startsWith(`网页选区引用（仅供参考）：\n${second}\n\n我的问题：\n`));
+      assert.match(sent, /给出「event loop」在这里的译法/);
+      assert.doesNotMatch(sent, /这条草稿不能发给推荐模型/);
+      assert.equal(await composer.inputValue(), '这条草稿不能发给推荐模型');
+      await quote.waitFor({ state: 'hidden' });
+      const recommendations = shell.locator('#chat-quote-terms');
+      await recommendations.waitFor({ state: 'hidden' });
+
+      const excerpt = 'You will join an AI Application team that is at the forefront of integrating LLMs and intelligent agents into real-world scenarios such as: Smart content generation for creators';
+      await source.locator('#ctx-a').evaluate((paragraph, text) => { paragraph.textContent = text; }, excerpt);
+      await realSelect(source, '#ctx-a', { paragraph: true });
+      const retry = recommendations.getByRole('button', { name: '重试' });
+      await retry.waitFor({ state: 'visible' });
+      assert.match(await recommendations.innerText(), /模型未返回可用的词语列表/);
+      assert.equal(await quote.innerText(), excerpt);
+      assert.equal(count(), 4);
+      assert.ok(latest().body.max_tokens > 256, 'recommendation budget must allow reasoning before the list');
+      await retry.click();
+      await until(async () => (await chips.count()) === 3, 'retry did not recover the recommendation');
+      assert.deepEqual(await chips.allTextContents(), ['forefront', 'LLMs', 'intelligent agents']);
+      assert.equal(count(), 5, 'retry must issue exactly one new request');
+    } finally {
+      await shell.close();
+      await secondShell.close();
+    }
+  });
   await check('consecutive A/B selections cancel delayed A and isolate B output', async () => {
     await gotoContext(); await settings('slow'); fixtures.reset(); await selectAndInvoke(source, '#term-a'); await until(() => count() === 1, 'slow A request missing'); const old = latest();
     await selectAndInvoke(source, '#term-b'); assert.match(await completed(source), /CONTEXT_B_OUTPUT/); assert.doesNotMatch(await answer(source).innerText(), /CONTEXT_A_OUTPUT/); assert.equal(count(), 2); await until(() => old.aborted, 'A was not cancelled');

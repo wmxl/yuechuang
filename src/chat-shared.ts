@@ -12,6 +12,11 @@ export function chatPageQuote(text: string): string {
   return text.length > MAX_CHAT_QUOTE ? text.slice(0, MAX_CHAT_QUOTE - 1) + '…' : text;
 }
 
+export function isQuotePassage(text: string): boolean {
+  // Skip single words, including selections from writing systems without spaces.
+  return /\S\s+\S|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{8}/u.test(text);
+}
+
 export function chatInputWithQuote(text: string, quote: string): string {
   return quote ? `网页选区引用（仅供参考）：\n${quote}\n\n我的问题：\n${text}` : text;
 }
@@ -65,11 +70,19 @@ export interface ChatQuoteSource {
 export type ChatCommand =
   | { type: 'chat:status' }
   | { type: 'chat:reading-window'; windowId: number; quoteEnabled: boolean }
+  | { type: 'chat:quote-terms'; id: string; text: string; source: ChatQuoteSource }
+  | { type: 'chat:cancel-quote-terms' }
   | { type: 'chat:send'; text: string; quoteSource?: ChatQuoteSource }
   | { type: 'chat:stop'; requestId: string }
   | { type: 'chat:clear'; requestId?: string };
 
+export type ChatQuoteTermsResult =
+  | { status: 'done'; terms: string[] }
+  | { status: 'error'; message: string }
+  | { status: 'cancelled' };
+
 export type ChatReadingEvent =
   | { type: 'chat:page-quote'; text: string; source: ChatQuoteSource }
+  | { type: 'chat:quote-terms'; id: string; result: ChatQuoteTermsResult }
   | { type: 'chat:follow-up-ready'; quote: string; source: ChatQuoteSource };
 

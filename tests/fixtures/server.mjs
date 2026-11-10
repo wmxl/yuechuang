@@ -81,6 +81,10 @@ export async function startFixtures({ port = 4317 } = {}) {
       res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.flushHeaders();
       const input = JSON.stringify(body.messages || []);
+      let quoteTermsInput;
+      if (body.messages?.[0]?.content?.startsWith('为中文读者从网页选区中挑出')) {
+        quoteTermsInput = JSON.parse(body.messages[1].content).quote;
+      }
       let contextInput;
       try { const candidate = JSON.parse(body.messages?.[1]?.content || 'null'); if (typeof candidate?.selection === 'string' && typeof candidate?.paragraphContext === 'string') contextInput = candidate; } catch {}
       const markers = ['LONG_ARTICLE_SENTINEL', 'LONG_ARTICLE_END_SENTINEL', 'LEAD_OUTSIDE_SENTINEL', 'DYNAMIC_ARTICLE_SENTINEL', 'ARTICLE_B_SENTINEL', 'ARTICLE_A_SENTINEL'].filter(marker => input.includes(marker));
@@ -95,7 +99,15 @@ export async function startFixtures({ port = 4317 } = {}) {
       // Short deterministic notes fit the planner's reserved merge budget.
       // A tail marker can reach the final answer only through an actual segment response.
       const contextMarker = contextInput?.selection.includes('microtasks') ? 'CONTEXT_B_OUTPUT' : contextInput?.selection.includes('resilience') ? 'CONTEXT_TRANSLATION_OUTPUT' : 'CONTEXT_A_OUTPUT';
-      const pieces = contextInput
+      const retryQuote = quoteTermsInput?.includes('at the forefront of integrating LLMs');
+      const firstQuoteAttempt = retryQuote && !requests.slice(0, -1).some(item => item.body.messages?.[1]?.content === body.messages[1].content);
+      const pieces = typeof quoteTermsInput === 'string'
+        ? retryQuote
+          ? [firstQuoteAttempt ? '我会先检查这段话中的术语。' : '1. **forefront**：前沿\n2. **llms**：大型语言模型\n3. **intelligent agents**：智能体']
+          : quoteTermsInput.includes('microtasks')
+            ? ['以下是推荐词。\n```json\n["Microtasks","invented term","event loop","microtasks","rendering"]\n```']
+            : ['["coherence","distributed cache"]']
+        : contextInput
         ? record.contextAnswerKind === 'details'
           ? record.contextMode === 'translate'
             ? [`双语例句：${contextMarker}。`, '\n1. The wetland showed resilience after the drought.\n这片湿地在干旱后展现了恢复能力。', '\n2. The system needs resilience when a server fails.\n服务器发生故障时，系统需要具备恢复能力。']
@@ -114,7 +126,7 @@ export async function startFixtures({ port = 4317 } = {}) {
           offset += size;
         }
       }
-      const initialDelay = model.includes('silent') ? 45_000 : model.includes('slow') ? 3_500 : 30;
+      const initialDelay = model.includes('silent') ? 45_000 : model.includes('slow') || quoteTermsInput?.includes('CONTEXT_A_NEAR_SENTINEL') ? 3_500 : 30;
       let cursor = 0;
       const writeNext = () => {
         if (res.destroyed) return;

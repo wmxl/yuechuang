@@ -1,6 +1,6 @@
 {
   "name": "local-reading-assistant",
-  "version": "0.14.2",
+  "version": "0.14.3",
   "description": "A local-first Chrome reading assistant with bring-your-own API and ChatGPT sign-in.",
   "license": "MIT",
   "repository": {

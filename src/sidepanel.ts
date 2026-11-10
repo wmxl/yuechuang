@@ -1,6 +1,6 @@
 import './sidepanel.css';
 import { renderChatMarkdown } from './chat-markdown';
-import { CHAT_PORT, MAX_CHAT_INPUT, MAX_CHAT_MESSAGES, MAX_CHAT_QUOTE, chatInputWithQuote, type ChatCitation, type ChatCommand, type ChatMessage, type ChatReadingEvent, type ChatResponseDetails, type ChatSearch, type ChatState } from './chat-shared';
+import { CHAT_PORT, MAX_CHAT_INPUT, MAX_CHAT_MESSAGES, MAX_CHAT_QUOTE, chatInputWithQuote, isQuotePassage, type ChatCitation, type ChatCommand, type ChatMessage, type ChatReadingEvent, type ChatResponseDetails, type ChatSearch, type ChatState } from './chat-shared';
 import { sanitizeChatCitations, sanitizeChatSearch } from './chat-search';
 import { sanitizeChatDetails } from './chat-details';
 import { siwcStatusText } from './siwc-shared';
@@ -28,6 +28,11 @@ function node<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, 
 }
 const input = element<HTMLTextAreaElement>('chat-input');
 const sendButton = element<HTMLButtonElement>('chat-send');
+const quoteTerms = element('chat-quote-terms');
+const quickActions = [
+  { label: '翻译', button: element<HTMLButtonElement>('chat-translate'), prompt: '请翻译所附文本。以中文为主时译成英文，否则译成中文。保留原意和格式。' },
+  { label: '解释', button: element<HTMLButtonElement>('chat-explain'), prompt: '请用通俗的中文解释所附文本的含义，必要时举一个简短的例子。' },
+];
 const stopButton = element<HTMLButtonElement>('chat-stop');
 const newButton = element<HTMLButtonElement>('chat-new');
 const scroll = element('chat-scroll');
@@ -46,8 +51,9 @@ let port: chrome.runtime.Port | undefined;
 let localError = '';
 let clearRequestId: string | undefined;
 type PageQuote = Extract<ChatReadingEvent, { type: 'chat:page-quote' }>;
-let pendingSubmission: { text: string; draft: string; quote?: PageQuote; previousIds: Set<string>; sawRunning?: boolean } | undefined;
+let pendingSubmission: { text: string; draft?: string; quote?: PageQuote; previousIds: Set<string>; sawRunning?: boolean } | undefined;
 let pageQuote: PageQuote | undefined;
+let quoteTermsId: string | undefined;
 const readingWindow = chrome.windows.getCurrent().then(window => window.id, () => undefined);
 const reconnectDelays = [150, 600, 1600];
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -133,11 +139,28 @@ function inputSize(): void {
   input.style.height = `${Math.min(180, Math.max(69, input.scrollHeight))}px`;
   element('chat-input-count').textContent = `${chatInputWithQuote(input.value.trim(), pageQuote?.text ?? '').length.toLocaleString('en-US')} / 6,000`;
 }
+function clearQuoteTerms(): void {
+  if (quoteTermsId) {
+    quoteTermsId = undefined;
+    command({ type: 'chat:cancel-quote-terms' });
+  }
+  quoteTerms.replaceChildren();
+  quoteTerms.hidden = true;
+}
 function setPageQuote(quote?: PageQuote): void {
+  clearQuoteTerms();
   pageQuote = quote;
   element('chat-page-quote-text').textContent = quote?.text ?? '';
   element('chat-page-quote').hidden = !quote;
   inputSize(); updateControls();
+  if (quote && isQuotePassage(quote.text)) requestQuoteTerms(quote);
+}
+function requestQuoteTerms(quote: PageQuote): void {
+  if (quoteTermsId || pageQuote !== quote || !connected || !state.settingsReady || !state.hasKey) return;
+  quoteTermsId = crypto.randomUUID();
+  quoteTerms.textContent = '难词预测中...';
+  quoteTerms.hidden = false;
+  command({ type: 'chat:quote-terms', id: quoteTermsId, text: quote.text, source: quote.source });
 }
 chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
   const source = pageQuote?.source;
@@ -165,6 +188,32 @@ function subscribeReadingWindow(): void {
 function receiveReadingEvent(value: ChatReadingEvent): void {
   if (value.type === 'chat:page-quote' && currentTab === 'chat' && typeof value.text === 'string' && value.text.length <= MAX_CHAT_QUOTE) {
     setPageQuote(value);
+  } else if (value.type === 'chat:quote-terms' && value.id === quoteTermsId && pageQuote) {
+    quoteTermsId = undefined;
+    const quote = pageQuote;
+    const { result } = value;
+    if (result.status === 'cancelled') {
+      clearQuoteTerms();
+      return;
+    }
+    if (result.status === 'error') {
+      const retry = node('button', 'quote-term', '重试');
+      retry.type = 'button';
+      retry.addEventListener('click', () => requestQuoteTerms(quote));
+      quoteTerms.replaceChildren(document.createTextNode(result.message), retry);
+    } else if (!result.terms.length) {
+      quoteTerms.textContent = '没有适合推荐的词';
+    } else quoteTerms.replaceChildren(...result.terms.map(term => {
+      const button = node('button', 'quote-term', term);
+      button.type = 'button';
+      button.title = `结合网页选区翻译并解释「${term}」`;
+      const prompt = `请结合整段网页选区，给出「${term}」在这里的译法或对应说法，再用简明中文解释它在原文中的意思。只处理这个词。原词是中文时可给出对应的英文。`;
+      button.addEventListener('click', () => {
+        if (!composing && pageQuote === quote) submit({ button, prompt });
+      });
+      return button;
+    }));
+    updateControls();
   } else if (value.type === 'chat:follow-up-ready') {
     if (pageQuote?.text === value.quote && pageQuote.source.tabId === value.source.tabId &&
         pageQuote.source.documentId === value.source.documentId && pageQuote.source.url === value.source.url) setPageQuote();
@@ -172,13 +221,27 @@ function receiveReadingEvent(value: ChatReadingEvent): void {
     input.focus();
   }
 }
+function submissionText(prompt?: string): string {
+  const draft = input.value.trim();
+  const quote = pageQuote?.text ?? '';
+  if (!prompt) return draft ? chatInputWithQuote(draft, quote) : '';
+  if (quote) return chatInputWithQuote(prompt, quote);
+  return draft ? `${prompt}\n\n待处理文本：\n${draft}` : '';
+}
+function fitsInput(text: string): boolean { return !!text && text.length <= MAX_CHAT_INPUT; }
 function updateControls(): void {
   const active = running();
   const oauth = state.connection === 'chatgptOAuth';
   const connectionReady = state.settingsReady && state.hasKey;
   const ready = loaded && connected && connectionReady;
+  const canSend = ready && !active && !awaitingSend;
   sendButton.hidden = active;
-  sendButton.disabled = !ready || active || awaitingSend || !input.value.trim() || chatInputWithQuote(input.value.trim(), pageQuote?.text ?? '').length > MAX_CHAT_INPUT;
+  sendButton.disabled = !canSend || !fitsInput(submissionText());
+  for (const { label, button, prompt } of quickActions) {
+    button.disabled = !canSend || !fitsInput(submissionText(prompt));
+    button.title = pageQuote ? `${label}网页选区，保留输入框草稿` : input.value.trim() ? `${label}输入框里的文字` : `先在网页上划词，或粘贴要${label}的文字`;
+  }
+  for (const button of quoteTerms.querySelectorAll('button')) button.disabled = !canSend;
   stopButton.hidden = !active;
   stopButton.disabled = !connected || !state.requestId;
   newButton.disabled = !loaded || !connected || (!state.messages.length && !state.error);
@@ -419,8 +482,8 @@ function receive(value: unknown): void {
       if (accepted) {
         if (pageQuote === pendingSubmission.quote) setPageQuote();
       } else {
-        if (!input.value) { input.value = pendingSubmission.draft; inputSize(); }
-        if (!state.error) localError = '这条问题尚未发送，请重新点击发送。';
+        if (!input.value && pendingSubmission.draft !== undefined) { input.value = pendingSubmission.draft; inputSize(); }
+        if (!state.error) localError = '这条消息尚未发送，请重试。';
       }
       pendingSubmission = undefined;
       awaitingSend = false;
@@ -477,8 +540,9 @@ function disconnect(): void {
   try { previous?.disconnect(); } catch { /* The worker may already be asleep. */ }
   connected = false;
   loaded = false;
+  clearQuoteTerms();
   awaitingSend = false;
-  if (pendingSubmission && !input.value) { input.value = pendingSubmission.draft; inputSize(); }
+  if (pendingSubmission?.draft !== undefined && !input.value) { input.value = pendingSubmission.draft; inputSize(); }
   pendingSubmission = undefined;
   if (running()) {
     const assistant = state.messages.at(-1);
@@ -512,7 +576,7 @@ function connectPort(): void {
     next = chrome.runtime.connect({ name: CHAT_PORT }); port = next;
     next.onMessage.addListener(value => {
       if (pageClosed || port !== next || portVersion !== version) return;
-      if (value?.type === 'chat:page-quote' || value?.type === 'chat:follow-up-ready') { receiveReadingEvent(value); return; }
+      if (value?.type === 'chat:page-quote' || value?.type === 'chat:follow-up-ready' || value?.type === 'chat:quote-terms') { receiveReadingEvent(value); return; }
       if (!validState(value)) return;
       clearTimeout(reconnectTimer); reconnectTimer = undefined;
       connected = true; reconnecting = false; reconnectAttempt = 0;
@@ -537,18 +601,17 @@ function recoverConnection(): void {
   clearTimeout(reconnectTimer); reconnectTimer = undefined; reconnectAttempt = 0;
   connectPort();
 }
-function submit(): void {
-  if (sendButton.disabled || running() || awaitingSend) return;
-  const draft = input.value.trim();
-  const text = chatInputWithQuote(draft, pageQuote?.text ?? '');
-  if (!draft || text.length > MAX_CHAT_INPUT) return;
+function submit(action?: { button: HTMLButtonElement; prompt: string }): void {
+  if ((action?.button ?? sendButton).disabled || running() || awaitingSend) return;
+  const text = submissionText(action?.prompt);
+  if (!fitsInput(text)) return;
+  const draft = action && pageQuote ? undefined : input.value;
   awaitingSend = true;
   pendingSubmission = { text, draft, quote: pageQuote, previousIds: new Set(state.messages.map(message => message.id)) };
   localError = '';
   updateControls();
   if (command({ type: 'chat:send', text, quoteSource: pageQuote?.source })) {
-    input.value = '';
-    inputSize();
+    if (draft !== undefined) { input.value = ''; inputSize(); }
     input.focus();
   } else {
     awaitingSend = false;
@@ -557,6 +620,7 @@ function submit(): void {
   }
 }
 element<HTMLFormElement>('chat-form').addEventListener('submit', event => { event.preventDefault(); submit(); });
+for (const action of quickActions) action.button.addEventListener('click', () => { if (!composing) submit(action); });
 element('chat-page-quote-remove').addEventListener('click', () => { setPageQuote(); input.focus(); });
 input.addEventListener('input', () => { suggestedDraft = undefined; inputSize(); updateControls(); });
 input.addEventListener('compositionstart', () => { composing = true; });

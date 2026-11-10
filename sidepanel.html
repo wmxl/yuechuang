@@ -20,7 +20,7 @@
       </nav>
       <main class="panel-workspace">
         <section class="panel chat-panel" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat">
-          <div class="chat-heading"><div><h1>直接对话</h1><p id="chat-status" role="status">正在连接…</p><p id="chat-connection" class="chat-connection" hidden></p></div><button type="button" class="quiet-button" id="chat-new" disabled><span aria-hidden="true">＋</span> 新对话</button></div>
+          <div class="chat-heading"><div><h1>直接对话</h1><p id="chat-status" role="status">正在连接…</p><p id="chat-connection" class="chat-connection" hidden></p><p class="chat-reading-hint">在网页上划选一段文字，模型会推荐难词。也可粘贴文字来翻译、解释。</p></div><button type="button" class="quiet-button" id="chat-new" disabled><span aria-hidden="true">＋</span> 新对话</button></div>
           <div class="chat-scroll" id="chat-scroll">
             <div id="chat-empty" class="chat-empty">
               <div class="empty-symbol" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M12 9h19l6 6v24H12Z"/><path d="M31 9v7h6M18 23h13M18 29h9"/><path class="symbol-spark" d="M9 3v8M5 7h8"/></svg></div>
@@ -42,7 +42,16 @@
               </div>
               <label for="chat-input" class="visually-hidden">输入消息</label>
               <textarea id="chat-input" rows="3" maxlength="6000" placeholder="输入问题，继续对话…" aria-describedby="composer-help" spellcheck="false"></textarea>
-              <div class="composer-tools"><span id="chat-input-count">0 / 6,000</span><button type="button" id="chat-stop" class="stop-button" hidden><span aria-hidden="true">■</span> 停止生成</button><button type="submit" id="chat-send" class="send-button" disabled>发送 <span aria-hidden="true">↑</span></button></div>
+              <div class="composer-tools">
+                <div id="chat-quote-terms" class="chat-quote-terms" aria-label="推荐词语" aria-live="polite" hidden></div>
+                <span id="chat-input-count">0 / 6,000</span>
+                <div class="composer-actions">
+                  <button type="button" id="chat-translate" class="composer-action" disabled>翻译</button>
+                  <button type="button" id="chat-explain" class="composer-action" disabled>解释</button>
+                  <button type="button" id="chat-stop" class="stop-button" hidden><span aria-hidden="true">■</span> 停止生成</button>
+                  <button type="submit" id="chat-send" class="send-button" disabled>发送 <span aria-hidden="true">↑</span></button>
+                </div>
+              </div>
             </form>
             <p class="composer-help" id="composer-help"><span>Enter 发送 · Shift + Enter 换行</span><span id="chat-history-note">会话仅本次浏览器使用</span></p>
           </div>
